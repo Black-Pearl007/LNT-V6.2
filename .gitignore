@@ -1,0 +1,5 @@
+.DS_Store
+Thumbs.db
+.vscode/
+*.backup.json
+my-business-setup.txt
