@@ -1,7 +1,7 @@
 // Trip Ledger offline cache. The page is fetched from the network first, so a new
 // index.html is picked up as soon as there is signal; the saved copy is used only
 // when the network fails. Server (Google Apps Script) requests are never cached.
-var CACHE = "trip-ledger-v6.4";   // keep in step with APP_VER in index.html
+var CACHE = "trip-ledger-v6.5";   // keep in step with APP_VER in index.html
 var NET_WAIT = 4000;               // on a weak signal, use the saved copy after 4 seconds instead of waiting
 var FILES = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-maskable-192.png", "./icon-maskable-512.png"];
 

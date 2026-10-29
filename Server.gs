@@ -17,9 +17,10 @@ const OWNER_COLLECTIONS = ["trips", "entries", "clients", "drivers", "fuel", "in
 const STAFF_ACTIONS = { status: 1, login: 1, push: 1, pull: 1, nextinv: 1, newinvoice: 1 };                        // every other action is owner only
 const STAFF_COLLECTIONS = { trips: 1, entries: 1, clients: 1, drivers: 1, fuel: 1, invoices: 1 };   // staff can add invoices; settings are read-only for staff
 // Staff may read and write every entry kind (payments, expenses, wages, vehicle details ...).
-const STAFF_SETTINGS = ["name", "owner", "proprietor", "address", "phone", "email", "gst", "gstRate", "sac", "prefix", "queries", "freeHrs", "haltRate", "remDays", "payGrace", "payGap", "sign",
+const STAFF_SETTINGS = ["name", "owner", "address", "phone", "email", "gst", "gstRate", "sac", "prefix", "queries", "freeHrs", "haltRate", "remDays", "payGrace", "payGap", "sign",
   "bankLabel", "bankAcName", "bankName", "bankBranch", "bankAcNo", "bankIfsc", "gpay", "bank2", "bank3"];   // read-only for staff, so invoices can show the bank details
 // Per collection: staff may CREATE new records, but may only EDIT existing ones where listed here.
+const INVOICE_DELETE_MS = 60 * 60 * 1000;   // an invoice can be deleted only within 1 hour of being made (keeps numbers in order)
 const STAFF_CAN_EDIT = { trips: 1, fuel: 1, entries: 1, clients: 1, drivers: 1 };       // invoices: add only. Staff can never delete anything.
 
 function doGet() { return reply({ ok: true, app: "trip-ledger" }); }
@@ -413,9 +414,17 @@ function push(b, who) {
     // (unless the stored record is already exactly what the phone is sending, e.g. a retry after a lost reply).
     const updCol = last > 1 ? sh.getRange(2, 5, last - 1, 1).getValues() : [];
     const delCol = last > 1 ? sh.getRange(2, 6, last - 1, 1).getValues() : [];
-    const conflicts = [], okOps = [];
+    const conflicts = [], okOps = [], locked = [];
     ops.forEach(function (o) {
       const key = String(o.c) + "|" + String(o.id), i = index[key];
+      // Invoices older than 1 hour (or with no creation time) can never be deleted, by anyone.
+      if (i && o.del && String(o.c) === "invoices" && !isDel(delCol[i - 2][0])) {
+        let age = Infinity;
+        try { const cur = JSON.parse(String(sh.getRange(i, 4).getValue())); if (cur && cur.at) age = Date.now() - Number(cur.at); } catch (e) { /* locked */ }
+        if (age > INVOICE_DELETE_MS) { locked.push(key); return; }
+      }
+      // A phone that never saw the shared settings must not overwrite them (it would wipe the bank details).
+      if (i && !o.del && String(o.c) === "settings" && typeof o.base !== "number" && !isDel(delCol[i - 2][0])) { conflicts.push(key); return; }
       // An invoice number that already belongs to a saved invoice is never overwritten by a phone that did not see it
       // (two phones that made the same number). An identical re-send, e.g. after a lost reply, is simply accepted.
       if (i && !o.del && String(o.c) === "invoices" && !isDel(delCol[i - 2][0])) {
@@ -431,7 +440,7 @@ function push(b, who) {
     });
 
     const chk = filterPushOps(who.role, okOps, existing, who.user);
-    const rej = chk.rej.concat(conflicts);
+    const rej = chk.rej.concat(conflicts, locked);
     const now = Date.now();
     const adds = [], updates = [], newPos = {};
     chk.allowed.forEach(function (o) {
