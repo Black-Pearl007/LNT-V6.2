@@ -550,12 +550,30 @@ function invoiceInfo(sh) {
   return { no: no, index: index };
 }
 function nextInv() { return { ok: true, no: invoiceInfo(sheet()).no }; }
+// The same trip must never get two invoice numbers (for example from two phones, or from tapping again days later).
+function findTripInvoice(sh, client, trip) {
+  const last = sh.getLastRow();
+  if (last < 2) return null;
+  const v = sh.getRange(2, 1, last - 1, 6).getValues(), want = String(client).trim().toLowerCase();
+  for (let i = v.length - 1; i >= 0; i--) {
+    if (v[i][1] !== "invoices" || isDel(v[i][5])) continue;
+    try {
+      const r = JSON.parse(String(v[i][3]));
+      if (String(r.trip || "") === trip && String(r.client || "").trim().toLowerCase() === want) return { rec: r, ts: Number(v[i][4]) };
+    } catch (e) { /* skip */ }
+  }
+  return null;
+}
 function newInvoice(b, who) {
   const d = b.data;
   if (!d || typeof d !== "object" || Array.isArray(d)) return { ok: false, error: "Invalid invoice." };
   if (!String(d.client || "").trim() || !(Number(d.total) > 0)) return { ok: false, error: "Invoice has no client or a zero total." };
   return withLock(function () {
     const sh = sheet(), info = invoiceInfo(sh);
+    if (String(d.trip || "") !== "") {
+      const dup = findTripInvoice(sh, d.client, String(d.trip));
+      if (dup) return { ok: true, rec: dup.rec, ts: dup.ts, existing: true };
+    }
     if (String(d.no) !== info.no) return { ok: false, taken: true, next: info.no, error: "That invoice number was just used on another phone." };
     const now = Date.now();
     const rec = Object.assign({}, d, { no: info.no, by: who.user, at: now });

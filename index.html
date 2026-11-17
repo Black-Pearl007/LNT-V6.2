@@ -87,7 +87,7 @@ tfoot{display:table-row-group}
 .ih h3{font-family:"Barlow Condensed",sans-serif;font-size:1.6rem;margin:0}
 .tot td{font-weight:700}
 .note{color:var(--mut);font-size:.88rem}
-@media print{body *{visibility:hidden}#inv,#inv *,#rpt,#rpt *,#rcp,#rcp *,#stm,#stm *,#vsm,#vsm *,#msm,#msm *{visibility:visible}#inv,#rpt,#rcp,#stm,#vsm,#msm{position:absolute;left:0;top:0;width:100%;border:0}#stm,#vsm,#msm{background:#fff;color:#111}#stm th,#stm td,#vsm th,#vsm td,#msm th,#msm td{border-color:#ccc}#rcp{background:#fff;color:#111}#inv table{font-size:12px}#inv table.it th,#inv table.it td{font-size:13.5px;padding:6px 7px}#rpt{background:#fff;color:#111}#rpt th,#rpt td{border-color:#ccc}}
+@media print{body *{visibility:hidden}#inv,#inv *,#rpt,#rpt *,#rcp,#rcp *,#stm,#stm *,#vsm,#vsm *,#msm,#msm *,#hbl,#hbl *{visibility:visible}#inv,#rpt,#rcp,#stm,#vsm,#msm,#hbl{position:absolute;left:0;top:0;width:100%;border:0}#stm,#vsm,#msm,#hbl{background:#fff;color:#111}#stm th,#stm td,#vsm th,#vsm td,#msm th,#msm td,#hbl th,#hbl td{border-color:#ccc}#rcp{background:#fff;color:#111}#inv table{font-size:12px}#inv table.it th,#inv table.it td{font-size:13.5px;padding:6px 7px}#rpt{background:#fff;color:#111}#rpt th,#rpt td{border-color:#ccc}}
 .logo{height:64px;width:auto;object-fit:contain}
 .hd{display:flex;align-items:center;gap:12px}
 .warn{background:#fff3cd;color:#4a3a00;border:1.5px solid #e0b400;border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600}
@@ -319,7 +319,7 @@ function staffRemove(user){
 }
 
 /* ---------- v5 helpers ---------- */
-var APP_VER="6.5",SK="ledger_points";
+var APP_VER="6.6",SK="ledger_points";
 function allowed(t){if(t==="history")return role==="owner"&&online();return role==="owner"||(t!=="dash"&&t!=="more");}
 function sharedSettings(){var o=Object.assign({},db.settings);delete o.ta;delete o.voice;delete o.lastBackup;return o;}
 function dstr(d){return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2);}
@@ -891,29 +891,83 @@ function ohStats(){
     var tr=db.trips.filter(function(t){return vkey(t.vehicle)===v;}).sort(byDate);
     var pays=db.entries.filter(function(e){return e.kind==="hpay"&&vkey(e.name)===v;}).sort(byDate);
     var hire=sum(tr,function(t){return n(t.hire);}),paid=sum(pays,function(e){return n(e.amount);});
-    return{no:v,m:m,tr:tr,pays:pays,hire:hire,paid:paid,bal:hire-paid};
+    return{no:v,m:m,tr:tr,pays:pays,hire:hire,paid:paid,bal:hire-paid,miss:tr.filter(function(t){return !(n(t.hire)>0);}).length};
   }).sort(function(a,b){return b.bal-a.bal;});
 }
 function viewHired(){
+  if(hbOpen)return viewHireBill();
   var S=ohStats(),tot=sum(S,function(x){return x.bal;});
   var h='<h2 style="margin-top:0">Other vehicles (hired)</h2><div class="acts" style="justify-content:flex-start;margin-bottom:6px"><button class="btn" data-act="new-hveh">Add vehicle</button><button class="btn ghost" data-act="new-hpay">Pay owner</button></div>'+
     '<p class="note">For vehicles you hire from other owners. Enter the hire amount on a trip (“Outside vehicle hire”) with that vehicle number and it is added here automatically. Our own vehicles are not listed.</p>';
   if(!S.length)return h+'<div class="empty">No other vehicles yet. Tap “Add vehicle” to save an owner’s details.</div>';
   h+='<div class="stats"><div class="stat"><small>Hire still to pay</small><b class="'+(tot>0.5?"bad":"ok")+'">'+money(tot)+'</b></div><div class="stat"><small>Vehicles</small><b>'+S.length+'</b></div></div>';
+  h+='<div class="acts" style="justify-content:flex-start;margin-bottom:6px"><button class="btn" id="hbBtn" data-act="hb-open"'+(hbCount()?"":" disabled")+'>Make bill for ticked vehicles ('+hbCount()+')</button><button class="btn ghost" data-act="hb-all">Tick all / none</button></div>';
   h+=S.map(function(x){
-    var m=x.m,st=x.bal>0.5?money(x.bal)+" to pay":x.bal<-0.5?money(-x.bal)+" paid extra":"Settled";
-    return'<div class="row"><div class="top"><b>'+esc(x.no)+'</b><span class="amt '+(x.bal>0.5?"bad":"ok")+'">'+st+'</span></div>'+
+    /* "Settled" only when there is real hire and it is fully paid. A vehicle with no hire amount entered is NOT settled, its hire is simply unknown. */
+    var m=x.m,cDue=r2(sum(x.tr,function(t){return tripPaid(t).due;})),cBill=r2(sum(x.tr,bill)),noHire=x.hire<=0.5&&x.paid<=0.5,st=x.bal>0.5?money(x.bal)+" to pay":x.bal<-0.5?money(-x.bal)+" paid extra":noHire?(x.tr.length?"Hire not entered":"No trips yet"):"Settled";
+    return'<div class="row"><label class="chk" style="margin:0 0 6px;font-weight:500"><input type="checkbox" class="hbk" data-v="'+esc(x.no)+'"'+(hbSel[x.no]?" checked":"")+'> Tick to make a hire bill</label><div class="top"><b>'+esc(x.no)+'</b><span class="amt '+(x.bal>0.5||(noHire&&x.tr.length)?"bad":"ok")+'">'+st+'</span></div>'+(x.miss>0&&!noHire?'<div class="chips"><span class="chip">'+x.miss+' trip'+(x.miss===1?"":"s")+' without hire amount</span></div>':"")+
       '<div class="route">'+esc([m.owner,m.phone].filter(Boolean).join("   ")||"No owner details yet")+'</div>'+
       (m.bank?'<div class="chips"><span class="chip">'+esc(m.bank)+'</span></div>':"")+(m.note?'<div class="chips"><span class="chip">'+esc(m.note)+'</span></div>':"")+
-      '<div class="grid"><div><span>Trips</span><b>'+x.tr.length+'</b></div><div><span>Hire total</span><b>'+money(x.hire)+'</b></div><div><span>Paid to owner</span><b>'+money(x.paid)+'</b></div></div>'+
-      (x.tr.length?'<div style="margin-top:6px">'+x.tr.slice(0,5).map(function(t){return'<div class="note" data-act="edit-trip" data-id="'+t.id+'" style="cursor:pointer">'+dt(t.date)+', '+esc(t.client)+', '+esc(t.from)+' to '+esc(t.to)+(n(t.hire)?' — hire '+money(t.hire):' — hire not entered')+'</div>';}).join("")+(x.tr.length>5?'<div class="note">…and '+(x.tr.length-5)+' earlier trips</div>':"")+'</div>':"")+
-      '<div class="acts" style="margin-top:8px;justify-content:flex-start"><button class="btn" data-act="new-hpay" data-name="'+esc(x.no)+'">Pay owner</button><button class="btn ghost" data-act="edit-hveh" data-name="'+esc(x.no)+'">Edit details</button>'+(m.phone?'<a class="btn ghost" href="tel:'+esc(String(m.phone).replace(/[^0-9+]/g,""))+'">Call</a>':"")+'</div></div>';
+      '<div class="grid"><div><span>Trips</span><b>'+x.tr.length+'</b></div><div><span>Hire total</span><b>'+money(x.hire)+'</b></div><div><span>Paid to owner</span><b>'+money(x.paid)+'</b></div></div>'+(x.tr.length?'<div class="grid"><div><span>Billed to clients</span><b>'+money(cBill)+'</b></div><div><span>Clients paid</span><b class="ok">'+money(cBill-cDue)+'</b></div><div><span>Clients pending</span><b class="'+(cDue>0.5?"bad":"ok")+'">'+money(cDue)+'</b></div></div>':"")+(x.bal<=0.5&&x.hire>0.5&&cDue>0.5?'<div class="warn" style="margin-top:6px">Owner is settled, but the client has not paid ('+money(cDue)+' pending).</div>':"")+
+      (x.tr.length?'<div style="margin-top:6px">'+x.tr.slice(0,5).map(function(t){return'<div class="note" data-act="edit-trip" data-id="'+t.id+'" style="cursor:pointer">'+dt(t.date)+', '+esc(t.client)+', '+esc(t.from)+' to '+esc(t.to)+' | client: '+stTxt(t)+(n(t.hire)?' — hire '+money(t.hire):' — hire not entered')+'</div>';}).join("")+(x.tr.length>5?'<div class="note">…and '+(x.tr.length-5)+' earlier trips</div>':"")+'</div>':"")+
+      '<div class="acts" style="margin-top:8px;justify-content:flex-start"><button class="btn" data-act="new-hpay" data-name="'+esc(x.no)+'">Pay owner</button><button class="btn ghost" data-act="hb-one" data-name="'+esc(x.no)+'">Make bill</button><button class="btn ghost" data-act="edit-hveh" data-name="'+esc(x.no)+'">Edit details</button>'+(m.phone?'<a class="btn ghost" href="tel:'+esc(String(m.phone).replace(/[^0-9+]/g,""))+'">Call</a>':"")+'</div></div>';
   }).join("");
   var P=db.entries.filter(function(e){return e.kind==="hpay";}).sort(function(a,b){return b.date<a.date?-1:b.date>a.date?1:0;});
   if(P.length)h+='<h2>Payments to vehicle owners</h2>'+P.map(function(e){
     return'<div class="row"><div class="top"><b>'+esc(vkey(e.name))+'</b><span class="amt">'+money(e.amount)+'</span></div><div class="chips"><span class="chip">'+dt(e.date)+'</span>'+(e.mode?'<span class="chip">'+esc(e.mode)+'</span>':"")+(e.note?'<span class="chip">'+esc(e.note)+'</span>':"")+'</div>'+
       '<div class="acts" style="margin-top:6px"><button class="btn ghost" data-act="del-hpay" data-id="'+e.id+'">Delete</button></div></div>';}).join("");
   return h;
+}
+/* ---------- Hire bill: one statement for the vehicles you tick, to give the vehicle owner when you pay ---------- */
+var hbSel={},hbOpen=false,hbF="",hbT="";
+function hbCount(){return Object.keys(hbSel).filter(function(k){return hbSel[k];}).length;}
+function hbUpd(){var b=$("#hbBtn");if(!b)return;var c=hbCount();b.textContent="Make bill for ticked vehicles ("+c+")";b.disabled=!c;}
+function hbData(){
+  var inR=function(d){return(!hbF||d>=hbF)&&(!hbT||d<=hbT);},bef=function(d){return !!hbF&&d<hbF;},asc=function(a,b){return a.date<b.date?-1:a.date>b.date?1:0;};
+  var V=ohStats().filter(function(x){return hbSel[x.no];}).sort(function(a,b){return a.no<b.no?-1:1;}).map(function(x){
+    var tr=x.tr.filter(function(t){return inR(t.date);}).sort(asc),pays=x.pays.filter(function(e){return inR(e.date);}).sort(asc);
+    var op=r2(sum(x.tr.filter(function(t){return bef(t.date);}),function(t){return n(t.hire);})-sum(x.pays.filter(function(e){return bef(e.date);}),function(e){return n(e.amount);}));
+    var hire=r2(sum(tr,function(t){return n(t.hire);})),paid=r2(sum(pays,function(e){return n(e.amount);}));
+    return{no:x.no,m:x.m,tr:tr,pays:pays,op:op,hire:hire,paid:paid,bal:r2(op+hire-paid),miss:tr.filter(function(t){return !(n(t.hire)>0);}).length};
+  });
+  var T={V:V};["op","hire","paid","bal","miss"].forEach(function(k){T[k]=r2(sum(V,function(x){return x[k];}));});
+  return T;
+}
+function hbBalTxt(b){return b<-0.5?"Paid extra "+money2(-b):money2(Math.max(0,b));}
+function hbMsg(D,per){
+  var s=db.settings,own=uniq(D.V.map(function(x){return x.m.owner||"";}));
+  var L=[];D.V.forEach(function(x){L.push("*Vehicle "+x.no+"*");x.tr.slice(0,12).forEach(function(t){L.push("- "+dt(t.date)+": "+t.from+" to "+t.to+" - "+(n(t.hire)>0?money2(t.hire):"hire not entered"));});if(x.tr.length>12)L.push("...and "+(x.tr.length-12)+" more trips (see the statement)");});
+  return"Dear "+(own.length===1?own[0]:"Sir/Madam")+",\nGreetings from "+s.name+".\nVehicle hire statement dated "+dt(today())+" ("+per+"):\n"+L.join("\n")+"\n\nTotal hire: "+money2(D.op+D.hire)+"\nPaid: "+money2(D.paid)+"\n*Balance to pay: "+hbBalTxt(D.bal)+"*\n\nThank you,\n"+s.name+(s.phone?"\nPhone: "+s.phone:"");
+}
+function hbDraft(kind){
+  var D=hbData(),ph=(D.V.filter(function(x){return x.m.phone;})[0]||{m:{}}).m.phone||"";
+  openDraft({kind:kind,to:kind==="wa"?ph:"",subject:"Vehicle hire statement from "+db.settings.name,message:window._hmsg||"",html:docHtml("#hbl")});
+}
+function viewHireBill(){
+  var D=hbData(),s=db.settings;
+  var per=(hbF||hbT)?(hbF?dt(hbF):"start")+" to "+(hbT?dt(hbT):"today"):"All trips";
+  var head='<div class="acts" style="justify-content:flex-start;margin-bottom:8px"><button class="btn ghost" data-act="hb-back">Back</button></div><div class="f" style="margin-bottom:8px">'+fld("hbF","From date (optional)",hbF,"date")+fld("hbT","To date (optional)",hbT,"date")+'</div>';
+  if(!D.V.length)return head+'<div class="empty">No vehicle ticked. Tap Back and tick a vehicle.</div>';
+  window._hmsg=hbMsg(D,per);
+  var warn=D.miss>0?'<div class="warn">'+D.miss+' trip'+(D.miss===1?" has":"s have")+' no hire amount entered, so '+(D.miss===1?"it is":"they are")+' not counted. Open the trip, enter "Outside vehicle hire", then make the bill again.</div>':"";
+  var acts='<div class="acts" style="justify-content:flex-start"><button class="btn" data-act="hb-print">Print or save PDF</button><button class="btn ghost" data-act="hb-wa">Send on WhatsApp</button><button class="btn ghost" data-act="hb-em">Send by email</button></div><p class="note">Give this to the vehicle owner when you pay. It lists every trip and every payment, and what is still to pay.</p>';
+  var to=D.V.map(function(x){return'<div><b>'+esc(x.no)+'</b>'+(x.m.owner?' - '+esc(x.m.owner):'')+(x.m.phone?' ('+esc(x.m.phone)+')':'')+(x.m.bank?'<br><small>'+esc(x.m.bank)+'</small>':'')+'</div>';}).join("");
+  var tabs=D.V.map(function(x){
+    var rows=x.tr.map(function(t,i){return'<tr><td class="l">'+(i+1)+'</td><td class="l">'+dt(t.date)+'</td><td class="l">'+esc(t.from)+'</td><td class="l">'+esc(t.to)+'</td><td>'+(n(t.hire)>0?money2(t.hire):"-")+'</td></tr>';}).join("")||'<tr><td colspan="5" class="l">No trips in this period</td></tr>';
+    var foot=(Math.abs(x.op)>0.5?'<tr><td colspan="4" class="l">Balance brought forward</td><td>'+money2(x.op)+'</td></tr>':"")+
+      '<tr class="tot"><td colspan="4" class="l">Hire total</td><td>'+money2(x.hire)+'</td></tr>'+
+      x.pays.map(function(e){return'<tr><td colspan="4" class="l">Paid on '+dt(e.date)+(e.mode?' ('+esc(e.mode)+')':'')+'</td><td>- '+money2(e.amount)+'</td></tr>';}).join("")+
+      '<tr class="tot"><td colspan="4" class="l">Balance to pay</td><td>'+hbBalTxt(x.bal)+'</td></tr>';
+    return'<h2>Vehicle '+esc(x.no)+'</h2><div class="tw"><table class="rt"><thead><tr><th class="l">S.no</th><th class="l">Date</th><th class="l">From</th><th class="l">To</th><th>Hire amount</th></tr></thead><tbody>'+rows+'</tbody><tfoot>'+foot+'</tfoot></table></div>';
+  }).join("");
+  var sum2=D.V.length>1?'<h2>Summary</h2><div class="tw"><table class="rt"><thead><tr><th class="l">Vehicle</th><th>Hire</th><th>Paid</th><th>Balance</th></tr></thead><tbody>'+D.V.map(function(x){return'<tr><td class="l">'+esc(x.no)+'</td><td>'+money2(x.op+x.hire)+'</td><td>'+money2(x.paid)+'</td><td>'+hbBalTxt(x.bal)+'</td></tr>';}).join("")+'</tbody></table></div>':"";
+  return head+warn+acts+
+   '<div id="hbl"><div class="ih"><div style="display:flex;gap:10px;align-items:center"><img src="'+LOGO+'" alt="" style="height:80px;width:auto;max-width:130px;object-fit:contain"><div><h3 class="cn">'+esc(s.name)+'</h3><div>'+esc(s.address)+'</div><div>Phone: '+esc(s.phone)+'</div></div></div>'+
+   '<div><b>VEHICLE HIRE STATEMENT</b><div>Date: '+dt(today())+'</div><div>Period: '+esc(per)+'</div></div></div>'+
+   '<p>To (vehicle owner):</p>'+to+tabs+sum2+
+   '<p style="margin:10px 0 0"><b>Total hire:</b> '+money2(D.op+D.hire)+' &nbsp; <b>Paid:</b> '+money2(D.paid)+' &nbsp; <b>Balance to pay:</b> '+hbBalTxt(D.bal)+'</p>'+
+   (D.bal>0.5?'<p style="margin:4px 0 0"><b>Amount in words:</b> Rupees '+numWords(D.bal)+' Only</p>':'')+
+   '<p style="text-align:right;margin:24px 0 0">For <b>'+esc(s.name)+'</b><br><br>Authorised Signatory</p></div>';
 }
 function openHveh(name){
   var m=name?(ohMaster().filter(function(e){return vkey(e.name)===vkey(name);})[0]||{name:name}):{};
@@ -1209,6 +1263,8 @@ document.addEventListener("change",function(e){
   else if(id==="tf"){tf=v;render();}
   else if(id==="mm"){if(v)mM=v;render();}else if(id==="mp"){mPend=e.target.checked;render();}
   else if(e.target.classList&&e.target.classList.contains("etk")){updPayAmt();}
+  else if(e.target.classList&&e.target.classList.contains("hbk")){hbSel[e.target.dataset.v]=e.target.checked;hbUpd();}
+  else if(id==="hbF"){hbF=v;render();}else if(id==="hbT"){hbT=v;render();}
 });
 function lastFill(veh,exceptId){return db.fuel.filter(function(x){return vkey(x.vehicle)===vkey(veh)&&x.id!=exceptId;}).sort(function(a,b){return n(b.odo)-n(a.odo);})[0];}
 function odoHint(){var b=$("#odoBox");if(!b)return;var v=$("#fVeh").value,l=v?lastFill(v,$("#fVeh").dataset.id):null;b.textContent=l?"Last reading for this vehicle: "+n(l.odo).toLocaleString("en-IN")+" km on "+dt(l.date)+".":"Enter the odometer reading shown on the dashboard when you fill diesel.";}
@@ -1273,7 +1329,19 @@ function needBank(cont){
    '<div class="acts"><button class="btn ghost" data-act="close">Cancel</button></div>';
   $("#dlg").showModal();
 }
-function resetNo(){invState.bankPicked=false;if(invState.done){invState.no=nextNo();invState.done=false;invState.noAt=0;}}
+function resetNo(keepGst){invState.bankPicked=false;if(invState.done){invState.no=nextNo();invState.done=false;invState.noAt=0;}if(!keepGst)adoptExisting();}
+/* If this trip (or this client and period) already has an invoice, open that invoice with its own number. Making it again would give a second number for the same bill. */
+function existingInv(){
+  var c=invState.client.trim().toLowerCase();
+  return db.invoices.filter(function(i){
+    if(String(i.client||"").trim().toLowerCase()!==c)return false;
+    return invState.trip?String(i.trip||"")===String(invState.trip):(!i.trip&&i.from===invState.from&&i.to===invState.to);
+  }).sort(function(a,b){return(+a.at||0)-(+b.at||0);}).pop()||null;
+}
+function adoptExisting(){
+  var iv=existingInv();if(!iv)return;
+  invState.no=iv.no;invState.bank=iv.bank||invState.bank||"1";invState.bankPicked=true;invState.gst=!!iv.tax;invState.igst=iv.tax?!!iv.tax.i:undefined;invState.done=true;
+}
 function invTrips(){return db.trips.filter(function(t){return t.client.trim().toLowerCase()===invState.client.toLowerCase()&&(invState.trip?String(t.id)===String(invState.trip):(t.date>=invState.from&&t.date<=invState.to));}).sort(function(a,b){return a.date<b.date?-1:1;});}
 function gstState(g){var m=String(g||"").trim().match(/^(\d{2})/);return m?m[1]:"";}
 function igstAuto(){var a=gstState(db.settings.gst),b=gstState((findBy(db.clients,invState.client)||{}).gst);return a&&b?a!==b:null;}
@@ -1369,7 +1437,7 @@ function viewInvoice(){
    fld("iF","From date",invState.from,"date")+fld("iT","To date",invState.to,"date")+fld("iN",online()?"Invoice number (given by the server)":"Invoice number",invState.no,"text","full",online()?"readonly":"")+'<div class="full"><label for="iTrip">Invoice for</label><select id="iTrip"><option value="">All trips in these dates</option>'+db.trips.filter(function(t){return t.client.trim().toLowerCase()===invState.client.toLowerCase();}).sort(function(a,b){return a.date<b.date?1:-1;}).slice(0,60).map(function(t){return'<option value="'+t.id+'"'+(String(invState.trip)===String(t.id)?" selected":"")+'>'+dt(t.date)+', '+esc(t.from)+' to '+esc(t.to)+', '+money2(bill(t))+'</option>';}).join("")+'</select></div>'+(bankAccts().length>1?'<div class="full"><label for="iB">Bank account on this invoice</label><select id="iB">'+bankAccts().map(function(b){return'<option value="'+b.id+'"'+((bankSel()||{}).id===b.id?" selected":"")+'>'+esc(b.label)+(b.name?" ("+esc(b.name)+")":"")+'</option>';}).join("")+'</select></div>':"")+'</div>'+
    (s.gst&&n(s.gstRate)>0?'<label class="chk" style="margin:0 0 10px"><input type="checkbox" id="iG"'+(invState.gst?" checked":"")+'> Add GST ('+n(s.gstRate)+'%) to this invoice (ஜிஎஸ்டி சேர்)</label>':"")+
    (g.on?'<label class="chk" style="margin:0 0 10px"><input type="checkbox" id="iI"'+(g.i?" checked":"")+'> Customer is in another state: charge IGST instead of CGST + SGST'+(invState.igst==null&&igstAuto()!==null?" (set from the GSTIN state codes)":"")+'</label>':"")+
-   '<div class="acts" style="justify-content:flex-start"><button class="btn" data-act="print">Print or save PDF</button><button class="btn ghost" data-act="inv-wa">Send on WhatsApp</button><button class="btn ghost" data-act="inv-em">Send by email</button>'+invDelBtn(invState.no,' this invoice')+'</div><p class="note" id="invmsg"></p>'+
+   (function(){var ex=invState.done?db.invoices.filter(function(i){return i.no===invState.no;})[0]:null;return ex?'<p class="note" style="margin:0 0 8px"><b>This invoice already exists.</b> Number '+esc(ex.no)+', made on '+dt(ex.date)+'. Opening it again does not create a new number.</p>':"";})()+'<div class="acts" style="justify-content:flex-start"><button class="btn" data-act="print">Print or save PDF</button><button class="btn ghost" data-act="inv-wa">Send on WhatsApp</button><button class="btn ghost" data-act="inv-em">Send by email</button>'+invDelBtn(invState.no,' this invoice')+'</div><p class="note" id="invmsg"></p>'+
    '<p class="note">Step 1: tap Print and choose “Save as PDF”. Step 2: send it on WhatsApp or email and attach the PDF. Columns with no data are left out of the invoice automatically. Made a mistake? The red Delete button works for 1 hour after the invoice is saved (by Print, WhatsApp or Email). After that the invoice is locked so the numbers stay in order. Older invoices are listed under Recent invoices at the bottom. Deleting an invoice does not delete the trips or payments.</p>'+
    '<div id="inv"><div class="ih"><div style="display:flex;gap:10px;align-items:center"><img src="'+LOGO+'" alt="" style="height:96px;width:auto;max-width:150px;object-fit:contain"><div><h3 class="cn">'+esc(s.name)+'</h3><div>'+esc(s.owner)+'</div><div>'+esc(s.address)+'</div><div>Phone: '+esc(s.phone)+'</div><div>'+esc(s.email)+'</div>'+(s.gst?'<div>GSTIN: '+esc(s.gst)+'</div>':"")+'</div></div>'+
    '<div><b>'+(g.on?"TRANSPORT SERVICE TAX INVOICE":"TRANSPORT SERVICE INVOICE")+'</b><div>No: '+esc(invState.no)+'</div><div>Date: '+dt(today())+'</div>'+(g.on&&s.sac?'<div>SAC: '+esc(s.sac)+'</div>':"")+'</div></div>'+
@@ -1390,8 +1458,8 @@ function bindInvoice(){
   [["iC","client"],["iF","from"],["iT","to"]].forEach(function(p){$("#"+p[0]).addEventListener("change",function(e){invState[p[1]]=e.target.value;if(p[1]==="client"){invState.trip="";invState.igst=undefined;}resetNo();render();});});
   if(!online())$("#iN").addEventListener("change",function(e){invState.no=e.target.value.trim()||nextNo();render();});
   refreshNo();
-  if($("#iG"))$("#iG").addEventListener("change",function(e){invState.gst=e.target.checked;resetNo();render();});
-  if($("#iI"))$("#iI").addEventListener("change",function(e){invState.igst=e.target.checked;resetNo();render();});
+  if($("#iG"))$("#iG").addEventListener("change",function(e){invState.gst=e.target.checked;resetNo(true);render();});
+  if($("#iI"))$("#iI").addEventListener("change",function(e){invState.igst=e.target.checked;resetNo(true);render();});
   $("#iTrip").addEventListener("change",function(e){invState.trip=e.target.value;resetNo();render();});
   if($("#iB"))$("#iB").addEventListener("change",function(e){invState.bank=e.target.value;invState.bankPicked=true;render();});
 }
@@ -1972,6 +2040,13 @@ document.addEventListener("click",function(e){
   else if(a==="v-print")window.print();
   else if(a==="v-csv")vehicleCsv();
   else if(a==="new-hveh")openHveh();
+  else if(a==="hb-open"){if(!hbCount()){toast("Tick at least one vehicle first","",true);return;}hbOpen=true;render();window.scrollTo(0,0);}
+  else if(a==="hb-one"){hbSel={};hbSel[b.dataset.name]=true;hbOpen=true;render();window.scrollTo(0,0);}
+  else if(a==="hb-all"){var al=ohStats(),on=al.every(function(x){return hbSel[x.no];});hbSel={};if(!on)al.forEach(function(x){hbSel[x.no]=true;});render();}
+  else if(a==="hb-back"){hbOpen=false;render();}
+  else if(a==="hb-print")window.print();
+  else if(a==="hb-wa")hbDraft("wa");
+  else if(a==="hb-em")hbDraft("em");
   else if(a==="edit-hveh")openHveh(b.dataset.name);
   else if(a==="save-hveh")saveHveh();
   else if(a==="del-hveh"){if(arm(b,"Tap again to remove")){var hv0=vkey(b.dataset.name);db.entries=db.entries.filter(function(x){return !(x.kind==="hveh"&&vkey(x.name)===hv0);});save();$("#dlg").close();render();toast("Details removed","நீக்கப்பட்டது",true);}}
